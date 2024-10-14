@@ -27,8 +27,8 @@ if(GPU_BACKEND STREQUAL "CUDA")
 
     # Add CUDA-specific source files
     set(GPU_SOURCES
-        gauss_seidel_cuda.cu
-        benchmark_cuda.cu
+        gauss_seidel.cu
+        benchmark.cu
     )
 
 elseif(GPU_BACKEND STREQUAL "HIP")
@@ -37,8 +37,8 @@ elseif(GPU_BACKEND STREQUAL "HIP")
 
     # Add HIP-specific source files
     set(GPU_SOURCES
-        gauss_seidel_hip.cpp
-        benchmark_hip.cpp
+        gauss_seidel.cu
+        benchmark.cu
     )
 
 else()
@@ -49,7 +49,7 @@ endif()
 # Add executable
 add_executable(gauss_seidel
     csr_matrix.cpp
-    gauss_seidel.cpp
+    gauss_seidel.cu
     ${GPU_SOURCES}
 )
 

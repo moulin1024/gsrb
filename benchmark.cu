@@ -7,7 +7,7 @@
 #include <iomanip>
 #include <cmath>
 #include <chrono>
-#include <hip/hip_runtime.h>
+#include <cuda_runtime.h>
 
 // Helper function for CPU timing
 template<typename F, typename... Args>
@@ -18,13 +18,13 @@ double measure_time(F func, Args&&... args) {
     return std::chrono::duration<double>(end - start).count();
 }
 
-// HIP error checking wrapper
-#define HIP_CHECK(call) \
+// CUDA error checking wrapper
+#define GPU_CHECK(call) \
     do { \
-        hipError_t error = call; \
-        if (error != hipSuccess) { \
-            std::cerr << "HIP error in " << __FILE__ << " at line " << __LINE__ << ": " \
-                      << hipGetErrorString(error) << std::endl; \
+        cudaError_t error = call; \
+        if (error != cudaSuccess) { \
+            std::cerr << "CUDA error in " << __FILE__ << " at line " << __LINE__ << ": " \
+                      << cudaGetErrorString(error) << std::endl; \
             exit(EXIT_FAILURE); \
         } \
     } while(0)
@@ -33,8 +33,8 @@ int main() {
     // Matrix size and parameters
     int size = 10000;
     double density = 0.5;
-    double min_value = -10.0;
-    double max_value = 10.0;
+    const double min_value = -1.0;
+    const double max_value = 1.0;
 
     // Generate sparse matrix
     CSRMatrix sparse_matrix = generate_sparse_diagonal_matrix(size, density, min_value, max_value);
@@ -51,44 +51,44 @@ int main() {
     // CPU Gauss-Seidel
     std::vector<double> solution_cpu;
     double cpu_solve_time = measure_time([&]() {
-        solution_cpu = gauss_seidel_red_black(sparse_matrix, b, max_iterations, tolerance);
+        solution_cpu = gauss_seidel_red_black_cpu(sparse_matrix, b, max_iterations, tolerance);
     });
 
     // GPU Gauss-Seidel
     std::vector<double> solution_gpu;
     float gpu_solve_time;
     
-    // Create HIP events for timing
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
+    // Create CUDA events for timing
+    cudaEvent_t start, stop;
+    GPU_CHECK(cudaEventCreate(&start));
+    GPU_CHECK(cudaEventCreate(&stop));
 
     // Start timing
-    HIP_CHECK(hipEventRecord(start));
+    GPU_CHECK(cudaEventRecord(start));
 
     // Run GPU Gauss-Seidel
-    solution_gpu = gauss_seidel_red_black_HIP(sparse_matrix, b, max_iterations, tolerance);
+    solution_gpu = gauss_seidel_red_black_gpu(sparse_matrix, b, max_iterations, tolerance);
 
     // Stop timing
-    HIP_CHECK(hipEventRecord(stop));
-    HIP_CHECK(hipEventSynchronize(stop));
+    GPU_CHECK(cudaEventRecord(stop));
+    GPU_CHECK(cudaEventSynchronize(stop));
 
     // Calculate elapsed time
-    HIP_CHECK(hipEventElapsedTime(&gpu_solve_time, start, stop));
+    GPU_CHECK(cudaEventElapsedTime(&gpu_solve_time, start, stop));
     gpu_solve_time /= 1000.0f; // Convert ms to seconds
 
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
+    // Destroy CUDA events
+    GPU_CHECK(cudaEventDestroy(start));
+    GPU_CHECK(cudaEventDestroy(stop));
 
     // Compute residuals
     double residual_cpu, residual_gpu;
     double cpu_residual_time = measure_time([&]() {
-        residual_cpu = compute_residual(sparse_matrix, solution_cpu, b);
+        residual_cpu = compute_residual_cpu(sparse_matrix, solution_cpu, b);
     });
 
     double gpu_residual_time = measure_time([&]() {
-        residual_gpu = compute_residual_HIP(sparse_matrix, solution_gpu, b);
+        residual_gpu = compute_residual_gpu(sparse_matrix, solution_gpu, b);
     });
 
     // Print results
