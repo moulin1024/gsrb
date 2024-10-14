@@ -1,5 +1,6 @@
 #include "csr_matrix.h"
-#include "gauss_seidel.h"
+#include "gauss_seidel_red_black.h"
+#include "switch_gpu_backend.h"
 #include <vector>
 #include <random>
 #include <algorithm>
@@ -7,7 +8,7 @@
 #include <iomanip>
 #include <cmath>
 #include <chrono>
-#include <cuda_runtime.h>
+
 
 // Helper function for CPU timing
 template<typename F, typename... Args>
@@ -17,17 +18,6 @@ double measure_time(F func, Args&&... args) {
     auto end = std::chrono::high_resolution_clock::now();
     return std::chrono::duration<double>(end - start).count();
 }
-
-// CUDA error checking wrapper
-#define GPU_CHECK(call) \
-    do { \
-        cudaError_t error = call; \
-        if (error != cudaSuccess) { \
-            std::cerr << "CUDA error in " << __FILE__ << " at line " << __LINE__ << ": " \
-                      << cudaGetErrorString(error) << std::endl; \
-            exit(EXIT_FAILURE); \
-        } \
-    } while(0)
 
 int main() {
     // Matrix size and parameters

@@ -28,15 +28,15 @@
 #define cudaEventSynchronize hipEventSynchronize
 #define cudaEventElapsedTime hipEventElapsedTime
 #define cudaEventDestroy hipEventDestroy
-
+#define cudaMemcpyDeviceToDevice hipMemcpyDeviceToDevice
 // Redefine CUDA kernel launch syntax
 // #define <<<gridSize, blockSize>>> hipLaunchKernelGGL
 
 
-// Redefine CUDA device functions
-#define __device__ __device__
-#define __global__ __global__
-#define __host__ __host__
+// // Redefine CUDA device functions
+// #define __device__ __device__
+// #define __global__ __global__
+// #define __host__ __host__
 
 // Redefine CUDA synchronization functions
 #define cudaDeviceSynchronize hipDeviceSynchronize

@@ -1,4 +1,4 @@
-#include "gauss_seidel.h"
+#include "gauss_seidel_red_black.h"
 #include "switch_gpu_backend.h"
 #include <cmath>
 #include <iostream>
