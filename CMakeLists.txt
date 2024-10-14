@@ -17,17 +17,17 @@ if(GPU_BACKEND STREQUAL "CUDA")
     find_package(CUDA REQUIRED)
     add_definitions(-DUSE_CUDA)
     
-    # Detect CUDA compute capability
-    include(FindCUDA/select_compute_arch)
-    CUDA_DETECT_INSTALLED_GPUS(INSTALLED_GPU_CCS_1)
-    string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
-    string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
-    string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
-    SET(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
+    # # Detect CUDA compute capability
+    # include(FindCUDA/select_compute_arch)
+    # CUDA_DETECT_INSTALLED_GPUS(INSTALLED_GPU_CCS_1)
+    # string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
+    # string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
+    # string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
+    SET(CMAKE_CUDA_ARCHITECTURES 80)
 
     # Add CUDA-specific source files
     set(GPU_SOURCES
-        gauss_seidel.cu
+        gauss_seidel_red_black.cu
         benchmark.cu
     )
 
