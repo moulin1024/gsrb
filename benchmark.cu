@@ -21,7 +21,7 @@ double measure_time(F func, Args&&... args) {
 
 int main() {
     // Matrix size and parameters
-    int size = 10000;
+    int size = 16392;
     double density = 0.5;
     const double min_value = -1.0;
     const double max_value = 1.0;
@@ -46,30 +46,9 @@ int main() {
 
     // GPU Gauss-Seidel
     std::vector<double> solution_gpu;
-    float gpu_solve_time;
     
-    // Create CUDA events for timing
-    cudaEvent_t start, stop;
-    GPU_CHECK(cudaEventCreate(&start));
-    GPU_CHECK(cudaEventCreate(&stop));
-
-    // Start timing
-    GPU_CHECK(cudaEventRecord(start));
-
     // Run GPU Gauss-Seidel
     solution_gpu = gauss_seidel_red_black_gpu(sparse_matrix, b, max_iterations, tolerance);
-
-    // Stop timing
-    GPU_CHECK(cudaEventRecord(stop));
-    GPU_CHECK(cudaEventSynchronize(stop));
-
-    // Calculate elapsed time
-    GPU_CHECK(cudaEventElapsedTime(&gpu_solve_time, start, stop));
-    gpu_solve_time /= 1000.0f; // Convert ms to seconds
-
-    // Destroy CUDA events
-    GPU_CHECK(cudaEventDestroy(start));
-    GPU_CHECK(cudaEventDestroy(stop));
 
     // Compute residuals
     double residual_cpu, residual_gpu;
@@ -88,7 +67,6 @@ int main() {
     std::cout << "  Residual ||Ax - b|| = " << residual_cpu << std::endl;
 
     std::cout << "\nGPU Red-Black Gauss-Seidel:" << std::endl;
-    std::cout << "  Solve time: " << gpu_solve_time << " seconds" << std::endl;
     std::cout << "  Residual ||Ax - b|| = " << residual_gpu << std::endl;
 
     // Compare solutions
@@ -97,12 +75,6 @@ int main() {
         max_diff = std::max(max_diff, std::abs(solution_cpu[i] - solution_gpu[i]));
     }
     std::cout << "\nMaximum difference between CPU and GPU solutions: " << max_diff << std::endl;
-
-    // Print speedup
-    double cpu_total_time = cpu_solve_time;
-    double gpu_total_time = gpu_solve_time;
-    double speedup = cpu_total_time / gpu_total_time;
-    std::cout << "\nGPU Speedup: " << speedup << "x" << std::endl;
 
     return 0;
 }

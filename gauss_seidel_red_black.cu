@@ -151,6 +151,14 @@ std::vector<double> gauss_seidel_red_black_gpu(const CSRMatrix& A, const std::ve
     int block_size = 256;
     int num_blocks = (n / 2 + block_size - 1) / block_size;
 
+    // Create CUDA events for timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    // Start timing
+    cudaEventRecord(start);
+
     for (int iter = 0; iter < max_iterations; ++iter) {
         double max_diff = 0.0;
         GPU_CHECK(cudaMemcpy(d_max_diff, &max_diff, sizeof(double), cudaMemcpyHostToDevice));
@@ -176,6 +184,17 @@ std::vector<double> gauss_seidel_red_black_gpu(const CSRMatrix& A, const std::ve
         }
     }
 
+    // Stop timing
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    // Calculate elapsed time
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    // Print the solving time
+    std::cout << "GPU solving time: " << milliseconds << " ms" << std::endl;
+
     // Copy result back to host
     GPU_CHECK(cudaMemcpy(x.data(), d_x, n * sizeof(double), cudaMemcpyDeviceToHost));
 
@@ -187,6 +206,10 @@ std::vector<double> gauss_seidel_red_black_gpu(const CSRMatrix& A, const std::ve
     GPU_CHECK(cudaFree(d_x_new));
     GPU_CHECK(cudaFree(d_b));
     GPU_CHECK(cudaFree(d_max_diff));
+
+    // Destroy CUDA events
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
     return x;
 }
@@ -259,4 +282,3 @@ double compute_residual_gpu(const CSRMatrix& A, const std::vector<double>& x, co
 
     return std::sqrt(norm);
 }
-
