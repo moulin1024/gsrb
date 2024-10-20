@@ -21,7 +21,7 @@ double measure_time(F func, Args&&... args) {
 
 int main() {
     // Matrix size and parameters
-    int size = 16392;
+    int size = 8192;
     double density = 0.5;
     const double min_value = -1.0;
     const double max_value = 1.0;
