@@ -137,7 +137,7 @@ std::vector<double> gauss_seidel_red_black_gpu(const CSRMatrix& A, const std::ve
     GPU_CHECK(cudaMemcpy(d_diagonal_inv, A.diagonal_inv.data(), n * sizeof(double), cudaMemcpyHostToDevice));  // Copy inverted diagonal
 
     // Set up kernel launch parameters
-    int block_size = 256;
+    int block_size = 64;
     int num_blocks = (n / 2 + block_size - 1) / block_size;
 
     // Create CUDA events for timing
