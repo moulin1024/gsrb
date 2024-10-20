@@ -8,6 +8,8 @@ CSRMatrix generate_sparse_diagonal_matrix(int size, double density, double min_v
     CSRMatrix matrix;
     matrix.rows = size;
     matrix.cols = size;
+    matrix.diagonal.resize(size);
+    matrix.diagonal_inv.resize(size);
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -33,9 +35,11 @@ CSRMatrix generate_sparse_diagonal_matrix(int size, double density, double min_v
         double diag = row_sum + std::abs(value_dis(gen)) + 1.0;
         if (dis(gen) < 0.5) diag = -diag;  // Randomly make some diagonal elements negative
 
-        // Add diagonal element
+        // Add diagonal element and its inverse
         matrix.values.push_back(diag);
         matrix.col_ind.push_back(i);
+        matrix.diagonal[i] = diag;
+        matrix.diagonal_inv[i] = 1.0 / diag;  // Store the inverse of the diagonal element
 
         // Add off-diagonal elements
         for (const auto& elem : row_elements) {

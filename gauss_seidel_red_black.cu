@@ -5,20 +5,17 @@
 #include <stdexcept>
 
 // CUDA kernel for Red-Black Gauss-Seidel iteration
-__global__ void gauss_seidel_red_black_kernel(int* row_ptr, int* col_ind, double* values, double* x, double* x_new, double* b, int n, int offset, double* max_diff) {
+__global__ void gauss_seidel_red_black_kernel(int* row_ptr, int* col_ind, double* values, double* x, double* x_new, double* b, double* diagonal_inv, int n, int offset, double* max_diff) {
     int i = (blockIdx.x * blockDim.x + threadIdx.x) * 2 + offset;
     if (i < n) {
         double sigma = 0.0;
-        double a_ii = 0.0;
 
         for (int j = row_ptr[i]; j < row_ptr[i + 1]; ++j) {
-            if (col_ind[j] == i) {
-                a_ii = values[j];
-            } else {
+            if (col_ind[j] != i) {
                 sigma += values[j] * x[col_ind[j]];
             }
         }
-        x_new[i] = (b[i] - sigma) / a_ii;
+        x_new[i] = (b[i] - sigma) * diagonal_inv[i];  // Use the inverted diagonal element
     }
 }
 
@@ -120,7 +117,7 @@ std::vector<double> gauss_seidel_red_black_gpu(const CSRMatrix& A, const std::ve
 
     // Allocate device memory
     int *d_row_ptr, *d_col_ind;
-    double *d_values, *d_x, *d_x_new, *d_b, *d_max_diff;
+    double *d_values, *d_x, *d_x_new, *d_b, *d_max_diff, *d_diagonal_inv;
     GPU_CHECK(cudaMalloc(&d_row_ptr, (n + 1) * sizeof(int)));
     GPU_CHECK(cudaMalloc(&d_col_ind, A.col_ind.size() * sizeof(int)));
     GPU_CHECK(cudaMalloc(&d_values, A.values.size() * sizeof(double)));
@@ -128,6 +125,7 @@ std::vector<double> gauss_seidel_red_black_gpu(const CSRMatrix& A, const std::ve
     GPU_CHECK(cudaMalloc(&d_x_new, n * sizeof(double)));
     GPU_CHECK(cudaMalloc(&d_b, n * sizeof(double)));
     GPU_CHECK(cudaMalloc(&d_max_diff, sizeof(double)));
+    GPU_CHECK(cudaMalloc(&d_diagonal_inv, n * sizeof(double)));  // Allocate memory for inverted diagonal
 
     // Copy data to device
     GPU_CHECK(cudaMemcpy(d_row_ptr, A.row_ptr.data(), (n + 1) * sizeof(int), cudaMemcpyHostToDevice));
@@ -136,6 +134,7 @@ std::vector<double> gauss_seidel_red_black_gpu(const CSRMatrix& A, const std::ve
     GPU_CHECK(cudaMemcpy(d_x, x.data(), n * sizeof(double), cudaMemcpyHostToDevice));
     GPU_CHECK(cudaMemcpy(d_x_new, x.data(), n * sizeof(double), cudaMemcpyHostToDevice));
     GPU_CHECK(cudaMemcpy(d_b, b.data(), n * sizeof(double), cudaMemcpyHostToDevice));
+    GPU_CHECK(cudaMemcpy(d_diagonal_inv, A.diagonal_inv.data(), n * sizeof(double), cudaMemcpyHostToDevice));  // Copy inverted diagonal
 
     // Set up kernel launch parameters
     int block_size = 256;
@@ -154,12 +153,12 @@ std::vector<double> gauss_seidel_red_black_gpu(const CSRMatrix& A, const std::ve
         GPU_CHECK(cudaMemcpy(d_max_diff, &max_diff, sizeof(double), cudaMemcpyHostToDevice));
 
         // Red sweep
-        gauss_seidel_red_black_kernel<<<num_blocks, block_size>>>(d_row_ptr, d_col_ind, d_values, d_x, d_x_new, d_b, n, 0, d_max_diff);
+        gauss_seidel_red_black_kernel<<<num_blocks, block_size>>>(d_row_ptr, d_col_ind, d_values, d_x, d_x_new, d_b, d_diagonal_inv, n, 0, d_max_diff);
         GPU_CHECK(cudaGetLastError());
         GPU_CHECK(cudaDeviceSynchronize());
 
         // Black sweep
-        gauss_seidel_red_black_kernel<<<num_blocks, block_size>>>(d_row_ptr, d_col_ind, d_values, d_x, d_x_new, d_b, n, 1, d_max_diff);
+        gauss_seidel_red_black_kernel<<<num_blocks, block_size>>>(d_row_ptr, d_col_ind, d_values, d_x, d_x_new, d_b, d_diagonal_inv, n, 1, d_max_diff);
         GPU_CHECK(cudaGetLastError());
         GPU_CHECK(cudaDeviceSynchronize());
 
@@ -196,6 +195,7 @@ std::vector<double> gauss_seidel_red_black_gpu(const CSRMatrix& A, const std::ve
     GPU_CHECK(cudaFree(d_x_new));
     GPU_CHECK(cudaFree(d_b));
     GPU_CHECK(cudaFree(d_max_diff));
+    GPU_CHECK(cudaFree(d_diagonal_inv));  // Free the inverted diagonal memory
 
     // Destroy CUDA events
     cudaEventDestroy(start);

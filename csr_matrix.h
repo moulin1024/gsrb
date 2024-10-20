@@ -9,6 +9,8 @@ struct CSRMatrix {
     std::vector<int> row_ptr;
     int rows;
     int cols;
+    std::vector<double> diagonal;
+    std::vector<double> diagonal_inv;
 };
 
 // Function to generate a sparse diagonally dominant matrix in CSR format
