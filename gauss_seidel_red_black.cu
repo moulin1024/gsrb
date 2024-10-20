@@ -12,18 +12,11 @@ __global__ void gauss_seidel_red_black_kernel(int* row_ptr, int* col_ind, double
         double a_ii = 0.0;
 
         for (int j = row_ptr[i]; j < row_ptr[i + 1]; ++j) {
-            int col = col_ind[j];
-            double val = values[j];
-            if (col == i) {
-                a_ii = val;
+            if (col_ind[j] == i) {
+                a_ii = values[j];
             } else {
-                sigma += val * x[col];
+                sigma += values[j] * x[col_ind[j]];
             }
-        }
-
-        if (a_ii == 0.0) {
-            printf("Zero diagonal element detected at row %d. Cannot proceed.\n", i);
-            return;
         }
 
         x_new[i] = (b[i] - sigma) / a_ii;

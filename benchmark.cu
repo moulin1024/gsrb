@@ -63,7 +63,7 @@ int main() {
     // Print results
     std::cout << std::scientific << std::setprecision(6);
     std::cout << "CPU Red-Black Gauss-Seidel:" << std::endl;
-    std::cout << "  Solve time: " << cpu_solve_time << " seconds" << std::endl;
+    std::cout << "  Solve time: " << cpu_solve_time*1000 << " milliseconds" << std::endl;
     std::cout << "  Residual ||Ax - b|| = " << residual_cpu << std::endl;
 
     std::cout << "\nGPU Red-Black Gauss-Seidel:" << std::endl;
