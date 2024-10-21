@@ -19,6 +19,29 @@ __global__ void gauss_seidel_red_black_kernel(int* row_ptr, int* col_ind, double
     }
 }
 
+__launch_bounds__ (64, 1)
+__global__ void gsrb_subloop_hip(
+    const int        kinit,
+    const int        kfinal,
+    const integer_t* __restrict__ redblack_indices,
+    const integer_t* __restrict__ i,
+    const integer_t* __restrict__ j,
+    const real_t*    __restrict__ val,
+    const real_t*    __restrict__ dinv,
+    real_t*          __restrict__ x,
+    const real_t*    __restrict__ b)
+{
+    const int kk = blockIdx.x * blockDim.x + threadIdx.x + kinit - 1;
+    if (kk < kfinal) {
+        const int ll            = redblack_indices[kk] - 1;
+        real_t    inner_product = 0.0;
+        for (auto mm = i[ll] - 1; mm < i[ll + 1] - 1; ++mm) {
+            inner_product += val[mm] * x[j[mm] - 1];
+        }
+        x[ll] += (b[ll] - inner_product) * dinv[ll];
+    }
+}
+
 // CUDA kernel for residual computation
 __global__ void compute_residual_kernel(int* row_ptr, int* col_ind, double* values, double* x, double* b, double* residual, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -204,6 +227,93 @@ std::vector<double> gauss_seidel_red_black_gpu(const CSRMatrix& A, const std::ve
     return x;
 }
 
+// New GPU function using gsrb_subloop_hip kernel
+std::vector<double> gauss_seidel_red_black_gpu_new(const CSRMatrix& A, const std::vector<double>& b, int max_iterations, double tolerance) {
+    int n = A.rows;
+    std::vector<double> x(n, 0.0); // Initial guess
+
+    // Allocate device memory
+    integer_t *d_redblack_indices, *d_i, *d_j;
+    real_t *d_val, *d_dinv, *d_x, *d_b;
+    
+    // Allocate and copy data to device
+    GPU_CHECK(cudaMalloc(&d_redblack_indices, n * sizeof(integer_t)));
+    GPU_CHECK(cudaMalloc(&d_i, (n + 1) * sizeof(integer_t)));
+    GPU_CHECK(cudaMalloc(&d_j, A.col_ind.size() * sizeof(integer_t)));
+    GPU_CHECK(cudaMalloc(&d_val, A.values.size() * sizeof(real_t)));
+    GPU_CHECK(cudaMalloc(&d_dinv, n * sizeof(real_t)));
+    GPU_CHECK(cudaMalloc(&d_x, n * sizeof(real_t)));
+    GPU_CHECK(cudaMalloc(&d_b, n * sizeof(real_t)));
+
+    // Copy data to device
+    // Note: You'll need to prepare redblack_indices and diagonal_inv (dinv) on the host
+    std::vector<integer_t> redblack_indices(n);
+    for (int i = 0; i < n; ++i) redblack_indices[i] = i + 1;
+    
+    GPU_CHECK(cudaMemcpy(d_redblack_indices, redblack_indices.data(), n * sizeof(integer_t), cudaMemcpyHostToDevice));
+    GPU_CHECK(cudaMemcpy(d_i, A.row_ptr.data(), (n + 1) * sizeof(integer_t), cudaMemcpyHostToDevice));
+    GPU_CHECK(cudaMemcpy(d_j, A.col_ind.data(), A.col_ind.size() * sizeof(integer_t), cudaMemcpyHostToDevice));
+    GPU_CHECK(cudaMemcpy(d_val, A.values.data(), A.values.size() * sizeof(real_t), cudaMemcpyHostToDevice));
+    GPU_CHECK(cudaMemcpy(d_dinv, A.diagonal_inv.data(), n * sizeof(real_t), cudaMemcpyHostToDevice));
+    GPU_CHECK(cudaMemcpy(d_x, x.data(), n * sizeof(real_t), cudaMemcpyHostToDevice));
+    GPU_CHECK(cudaMemcpy(d_b, b.data(), n * sizeof(real_t), cudaMemcpyHostToDevice));
+
+    // Set up kernel launch parameters
+    int block_size = 64;
+    int num_blocks = (n + block_size - 1) / block_size;
+
+    // Create CUDA events for timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    // Start timing
+    cudaEventRecord(start);
+
+    for (int iter = 0; iter < max_iterations; ++iter) {
+        // Red sweep
+        gsrb_subloop_hip<<<num_blocks, block_size>>>(1, n/2 + 1, d_redblack_indices, d_i, d_j, d_val, d_dinv, d_x, d_b);
+        GPU_CHECK(cudaGetLastError());
+        GPU_CHECK(cudaDeviceSynchronize());
+
+        // Black sweep
+        gsrb_subloop_hip<<<num_blocks, block_size>>>(n/2 + 1, n + 1, d_redblack_indices, d_i, d_j, d_val, d_dinv, d_x, d_b);
+        GPU_CHECK(cudaGetLastError());
+        GPU_CHECK(cudaDeviceSynchronize());
+
+        // Note: Convergence check is omitted for simplicity, but can be added if needed
+    }
+
+    // Stop timing
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    // Calculate elapsed time
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    // Print the solving time
+    std::cout << "New GPU solving time: " << milliseconds << " ms" << std::endl;
+
+    // Copy result back to host
+    GPU_CHECK(cudaMemcpy(x.data(), d_x, n * sizeof(real_t), cudaMemcpyDeviceToHost));
+
+    // Free device memory
+    GPU_CHECK(cudaFree(d_redblack_indices));
+    GPU_CHECK(cudaFree(d_i));
+    GPU_CHECK(cudaFree(d_j));
+    GPU_CHECK(cudaFree(d_val));
+    GPU_CHECK(cudaFree(d_dinv));
+    GPU_CHECK(cudaFree(d_x));
+    GPU_CHECK(cudaFree(d_b));
+
+    // Destroy CUDA events
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+
+    return x;
+}
+
 double compute_residual_cpu(const CSRMatrix& A, const std::vector<double>& x, const std::vector<double>& b) {
     std::vector<double> residual(b.size(), 0.0);
     
@@ -272,3 +382,30 @@ double compute_residual_gpu(const CSRMatrix& A, const std::vector<double>& x, co
 
     return std::sqrt(norm);
 }
+
+// Function to compare results
+void compare_results(const std::vector<double>& x1, const std::vector<double>& x2, double tolerance) {
+    if (x1.size() != x2.size()) {
+        std::cout << "Error: Solutions have different sizes." << std::endl;
+        return;
+    }
+
+    double max_diff = 0.0;
+    for (size_t i = 0; i < x1.size(); ++i) {
+        double diff = std::abs(x1[i] - x2[i]);
+        if (diff > max_diff) max_diff = diff;
+    }
+
+    std::cout << "Maximum difference between solutions: " << max_diff << std::endl;
+    if (max_diff < tolerance) {
+        std::cout << "Solutions are consistent within tolerance." << std::endl;
+    } else {
+        std::cout << "Solutions differ more than the specified tolerance." << std::endl;
+    }
+}
+
+// In main() or wherever you're calling the solver:
+std::vector<double> solution_original = gauss_seidel_red_black_gpu(A, b, max_iterations, tolerance);
+std::vector<double> solution_new = gauss_seidel_red_black_gpu_new(A, b, max_iterations, tolerance);
+
+compare_results(solution_original, solution_new, 1e-6);
