@@ -41,6 +41,7 @@ __global__ void gsrb_subloop(
         for (int mm = row_start; mm < row_end; ++mm) {
             inner_product += val[mm] * x[j[mm] - 1];
         }
+        // x[ll] += (b[ll] - inner_product) * dinv[ll];
         atomicAdd(&x[ll], (b[ll] - inner_product) * dinv[ll]);
     }
 }
@@ -105,45 +106,48 @@ int main()
 
     // Start timing
     cudaEventRecord(start);
+    int loop_count = 100;
 
-    // Red loop
-    int numBlocks = (n_points_red + blockSize - 1) / blockSize;
-    gsrb_subloop<<<numBlocks, blockSize>>>(
-            1,
-            n_points_red,
-            d_redblack_indices,
-            d_i,
-            d_j,
-            d_val,
-            d_dinv,
-            d_u,
-            d_b);
+    for (int i = 0; i < loop_count; ++i) {
+        // Red loop
+        int numBlocks = (n_points_red + blockSize - 1) / blockSize;
+        gsrb_subloop<<<numBlocks, blockSize>>>(
+                1,
+                n_points_red,
+                d_redblack_indices,
+                d_i,
+                d_j,
+                d_val,
+                d_dinv,
+                d_u,
+                d_b);
 
-    // Black loop
-    numBlocks = (n_points_black + blockSize - 1) / blockSize;
-    gsrb_subloop<<<numBlocks, blockSize>>>(
-            n_points_red,
-            n_points_red + n_points_black,
-            d_redblack_indices,
-            d_i,
-            d_j,
-            d_val,
-            d_dinv,
-            d_u,
-            d_b);
+        // Black loop
+        numBlocks = (n_points_black + blockSize - 1) / blockSize;
+        gsrb_subloop<<<numBlocks, blockSize>>>(
+                n_points_red,
+                n_points_red + n_points_black,
+                d_redblack_indices,
+                d_i,
+                d_j,
+                d_val,
+                d_dinv,
+                d_u,
+                d_b);
 
-    // Edge loop
-    numBlocks = (n_points - n_points_black - n_points_red + blockSize - 1) / blockSize;
-    gsrb_subloop<<<numBlocks, blockSize>>>(
-            n_points_red + n_points_black,
-            n_points,
-            d_redblack_indices,
-            d_i,
-            d_j,
-            d_val,
-            d_dinv,
-            d_u,
-            d_b);
+        // Edge loop
+        numBlocks = (n_points - n_points_black - n_points_red + blockSize - 1) / blockSize;
+        gsrb_subloop<<<numBlocks, blockSize>>>(
+                n_points_red + n_points_black,
+                n_points,
+                d_redblack_indices,
+                d_i,
+                d_j,
+                d_val,
+                d_dinv,
+                d_u,
+                d_b);
+    }
 
     // Stop timing
     cudaEventRecord(stop);
@@ -152,17 +156,15 @@ int main()
     // Calculate and print the elapsed time
     float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "GPU execution time: " << milliseconds << " ms" << std::endl;
+    std::cout << "GPU execution time: " << milliseconds/loop_count << " ms" << std::endl;
 
     // Calculate and print FLOPs
     double avg_nnz_per_row = static_cast<double>(nnz) / n_points;
     double flops_per_iteration = (2 * avg_nnz_per_row) + 3;
     double total_flops = n_points * flops_per_iteration;
     double gflops = total_flops / 1e9;
-    double gflops_per_second = gflops / (milliseconds / 1000.0);
+    double gflops_per_second = gflops / (milliseconds / 1000.0 / loop_count);
 
-    std::cout << "Estimated FLOPs: " << std::fixed << std::setprecision(2) << total_flops << std::endl;
-    std::cout << "Estimated GFLOPs: " << gflops << std::endl;
     std::cout << "Estimated GFLOP/s: " << gflops_per_second << std::endl;
 
     // Copy results back to host (if needed)
