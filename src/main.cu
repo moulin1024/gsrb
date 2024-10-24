@@ -1,123 +1,28 @@
+// main.cu
+
+#include "kernels.h"
+#include "definition.h"
+#include "data_loader.h"
+#include "utils.h"
 #include "switch_gpu_backend.h"
+
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <iomanip>
-#include <omp.h> // For OpenMP parallelization in compute_residual
-
-// Function to load binary data from files
-void load_binary_data(const char* filename, void* data, size_t size) {
-    FILE* file = fopen(filename, "rb");
-    if (file == nullptr) {
-        std::cerr << "Error opening file: " << filename << std::endl;
-        exit(EXIT_FAILURE);
-    }
-    size_t read_size = fread(data, 1, size, file);
-    if (read_size != size) {
-        std::cerr << "Error reading file: " << filename << std::endl;
-        exit(EXIT_FAILURE);
-    }
-    fclose(file);
-}
-
-// Original kernel function with strided memory access
-__global__ void gsrb_subloop(
-    const int                     kinit,
-    const int                     kfinal,
-    const int*       __restrict__ redblack_indices,
-    const int*       __restrict__ i,
-    const int*       __restrict__ j,
-    const double*    __restrict__ val,
-    const double*    __restrict__ dinv,
-    double*          __restrict__ x,
-    const double*    __restrict__ b)
-{
-    const int kk0 = blockIdx.x * blockDim.x + threadIdx.x;
-    const int dkk = blockDim.x * gridDim.x;
-    for (auto kk = kk0 + kinit - 1; kk < kfinal; kk += dkk) {
-        const int ll = redblack_indices[kk] - 1;
-        double inner_product = 0.0;
-        const int row_start = i[ll] - 1;
-        const int row_end = i[ll + 1] - 1;
-
-        #pragma unroll 5
-        for (int mm = row_start; mm < row_end; ++mm) {
-            inner_product += val[mm] * x[j[mm] - 1];
-        }
-        x[ll] += (b[ll] - inner_product) * dinv[ll];
-    }
-}
-
-// Optimized kernel function with contiguous data access
-__global__ void gsrb_subloop_contiguous(
-    const int                     kinit,
-    const int                     kfinal,
-    const int*       __restrict__ i,
-    const int*       __restrict__ j,
-    const double*    __restrict__ val,
-    const double*    __restrict__ dinv,
-    double*          __restrict__ x,
-    const double*    __restrict__ b)
-{
-    const int kk0 = blockIdx.x * blockDim.x + threadIdx.x;
-    const int dkk = gridDim.x * blockDim.x;
-    
-    for (int kk = kk0 + kinit - 1; kk < kfinal; kk += dkk) {
-        const int ll = kk + 1; // Continuous indexing
-        double inner_product = 0.0;
-        const int row_start = i[ll] - 1;
-        const int row_end = i[ll + 1] - 1;
-
-        #pragma unroll 5
-        for (int mm = row_start; mm < row_end; ++mm) {
-            inner_product += val[mm] * x[j[mm] - 1];
-        }
-
-        // Update x[ll]
-        x[ll] += (b[ll] - inner_product) * dinv[ll];
-    }
-}
-
-// Function to compute the residual on CPU
-double compute_residual(const int* i, const int* j, const double* val, const double* x, const double* b, int n_points) {
-    double residual = 0.0;
-    #pragma omp parallel for reduction(+:residual)
-    for (int row = 0; row < n_points; ++row) {
-        double sum = 0.0;
-        for (int idx = i[row] - 1; idx < i[row + 1] - 1; ++idx) {
-            sum += val[idx] * x[j[idx] - 1];
-        }
-        double r = b[row] - sum;
-        residual += r * r;
-    }
-    return std::sqrt(residual);
-}
-
-// Function to permute solution back to original order
-void permute_back(const double* x_reordered, double* x_original, const int* new_to_old, int n_points) {
-    for (int idx = 0; idx < n_points; ++idx) {
-        int old_idx = new_to_old[idx];
-        x_original[old_idx] = x_reordered[idx];
-    }
-}
+#include <omp.h>       // For OpenMP parallelization in compute_residual
+#include <algorithm>   // For std::copy, std::fill
 
 int main()
 {
-    const int blockSize = 256;
-    const int nnz = 56825529;
-    const int n_points = 11437831;
-    const int n_points_red = 5666455;
-    const int n_points_black = 5666400;
-    const int n_points_edge = n_points - (n_points_red + n_points_black);
-
     // Load data for both versions
-    int *h_redblack_indices = new int[n_points];
-    int *h_i = new int[n_points + 1];
-    int *h_j = new int[nnz];
-    double *h_val = new double[nnz];
-    double *h_dinv = new double[n_points];
-    double *h_u = new double[n_points];
-    double *h_b = new double[n_points];
+    int* h_redblack_indices = new int[n_points];
+    int* h_i = new int[n_points + 1];
+    int* h_j = new int[nnz];
+    double* h_val = new double[nnz];
+    double* h_dinv = new double[n_points];
+    double* h_u = new double[n_points];
+    double* h_b = new double[n_points];
 
     load_binary_data("mat/redblack_indices.bin", h_redblack_indices, n_points * sizeof(int));
     load_binary_data("mat/i.bin", h_i, (n_points + 1) * sizeof(int));
@@ -128,13 +33,13 @@ int main()
     std::fill(h_u, h_u + n_points, 0.0);
 
     // Copy data for original version (strided access)
-    int *h_redblack_indices_orig = new int[n_points];
-    int *h_i_orig = new int[n_points + 1];
-    int *h_j_orig = new int[nnz];
-    double *h_val_orig = new double[nnz];
-    double *h_dinv_orig = new double[n_points];
-    double *h_u_orig = new double[n_points];
-    double *h_b_orig = new double[n_points];
+    int* h_redblack_indices_orig = new int[n_points];
+    int* h_i_orig = new int[n_points + 1];
+    int* h_j_orig = new int[nnz];
+    double* h_val_orig = new double[nnz];
+    double* h_dinv_orig = new double[n_points];
+    double* h_u_orig = new double[n_points];
+    double* h_b_orig = new double[n_points];
 
     std::copy(h_redblack_indices, h_redblack_indices + n_points, h_redblack_indices_orig);
     std::copy(h_i, h_i + n_points + 1, h_i_orig);
@@ -145,12 +50,12 @@ int main()
     std::copy(h_b, h_b + n_points, h_b_orig);
 
     // Copy data for optimized version (contiguous access)
-    int *h_i_reordered = new int[n_points + 1];
-    int *h_j_reordered = new int[nnz];
-    double *h_val_reordered = new double[nnz];
-    double *h_dinv_reordered = new double[n_points];
-    double *h_u_reordered = new double[n_points];
-    double *h_b_reordered = new double[n_points];
+    int* h_i_reordered = new int[n_points + 1];
+    int* h_j_reordered = new int[nnz];
+    double* h_val_reordered = new double[nnz];
+    double* h_dinv_reordered = new double[n_points];
+    double* h_u_reordered = new double[n_points];
+    double* h_b_reordered = new double[n_points];
 
     // Create permutation mappings
     int* old_to_new = new int[n_points]; // Maps old indices to new indices
@@ -220,7 +125,6 @@ int main()
     float milliseconds_orig = 0, milliseconds_opt = 0;
     double gflops_per_second_orig = 0, gflops_per_second_opt = 0;
     double final_residual_orig = 0, final_residual_opt = 0;
-    int loop_count = 100;
 
     // ------------------------
     // Original Version (Strided Access)
@@ -230,8 +134,8 @@ int main()
         std::cout << "\nRunning Original Version (Strided Access)...\n";
 
         // Declare device variables
-        int *d_redblack_indices, *d_i, *d_j;
-        double *d_val, *d_dinv, *d_u, *d_b, *d_u_old;
+        int* d_redblack_indices, * d_i, * d_j;
+        double* d_val, * d_dinv, * d_u, * d_b, * d_u_old;
 
         // Allocate device memory
         cudaMalloc(&d_redblack_indices, n_points * sizeof(int));
@@ -355,8 +259,8 @@ int main()
         std::cout << "\nRunning Optimized Version (Contiguous Access)...\n";
 
         // Declare device variables
-        int *d_i, *d_j;
-        double *d_val, *d_dinv, *d_u, *d_b, *d_u_old;
+        int* d_i, * d_j;
+        double* d_val, * d_dinv, * d_u, * d_b, * d_u_old;
 
         // Allocate device memory
         cudaMalloc(&d_i, (n_points + 1) * sizeof(int));
@@ -394,7 +298,7 @@ int main()
             // Red nodes
             int numBlocks = (n_points_red + blockSize - 1) / blockSize;
             gsrb_subloop_contiguous<<<numBlocks, blockSize>>>(
-                0,
+                1,
                 n_points_red,
                 d_i,
                 d_j,
@@ -406,7 +310,7 @@ int main()
             // Black nodes
             numBlocks = (n_points_black + blockSize - 1) / blockSize;
             gsrb_subloop_contiguous<<<numBlocks, blockSize>>>(
-                n_points_red,
+                n_points_red + 1,
                 n_points_red + n_points_black,
                 d_i,
                 d_j,
@@ -418,7 +322,7 @@ int main()
             // Edge nodes
             numBlocks = (n_points_edge + blockSize - 1) / blockSize;
             gsrb_subloop_contiguous<<<numBlocks, blockSize>>>(
-                n_points_red + n_points_black,
+                n_points_red + n_points_black + 1,
                 n_points,
                 d_i,
                 d_j,
