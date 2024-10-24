@@ -46,6 +46,21 @@ __global__ void gsrb_subloop(
     }
 }
 
+// Add this function to compute the residual on CPU
+double compute_residual(const int* i, const int* j, const double* val, const double* x, const double* b, int n_points) {
+    double residual = 0.0;
+    #pragma omp parallel for reduction(+:residual)
+    for (int row = 0; row < n_points; ++row) {
+        double sum = 0.0;
+        for (int idx = i[row] - 1; idx < i[row + 1] - 1; ++idx) {
+            sum += val[idx] * x[j[idx] - 1];
+        }
+        double r = b[row] - sum;
+        residual += r * r;
+    }
+    return std::sqrt(residual);
+}
+
 int main()
 {
     const int blockSize = 256;
@@ -103,6 +118,10 @@ int main()
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
+
+    // Compute initial residual
+    double initial_residual = compute_residual(h_i, h_j, h_val, h_u, h_b, n_points);
+    std::cout << "Initial residual: " << std::setprecision(12) << initial_residual << std::endl;
 
     // Start timing
     cudaEventRecord(start);
@@ -167,8 +186,12 @@ int main()
 
     std::cout << "Estimated GFLOP/s: " << gflops_per_second << std::endl;
 
-    // Copy results back to host (if needed)
+    // Copy results back to host
     cudaMemcpy(h_u, d_u, n_points * sizeof(double), cudaMemcpyDeviceToHost);
+
+    // Compute final residual
+    double final_residual = compute_residual(h_i, h_j, h_val, h_u, h_b, n_points);
+    std::cout << "Final residual: " << std::setprecision(12) << final_residual << std::endl;
 
     // Free device memory
     cudaFree(d_redblack_indices);
