@@ -34,3 +34,6 @@ Makefile
 # OS-specific files
 .DS_Store
 Thumbs.db
+*.csv
+/mat
+/workloads
