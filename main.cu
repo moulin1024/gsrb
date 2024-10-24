@@ -32,14 +32,14 @@ __global__ void gsrb_subloop(
     double*          __restrict__ x,
     const double*    __restrict__ b)
 {
-    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    const int kk = idx + kinit;
-
-    if (kk < kfinal) {
+    const int kk0 = blockIdx.x * blockDim.x + threadIdx.x;
+    const int dkk = blockDim.x * gridDim.x;
+    for (auto kk = kk0 + kinit - 1; kk < kfinal; kk += dkk) {
         const int ll = redblack_indices[kk] - 1;
         double inner_product = 0.0;
-        int row_start = i[ll] - 1;
-        int row_end = i[ll + 1] - 1;
+        const int row_start = i[ll] - 1;
+        const int row_end = i[ll + 1] - 1;
+
         #pragma unroll 5
         for (int mm = row_start; mm < row_end; ++mm) {
             inner_product += val[mm] * x[j[mm] - 1];
@@ -50,8 +50,8 @@ __global__ void gsrb_subloop(
 
 // Optimized kernel function with contiguous data access
 __global__ void gsrb_subloop_contiguous(
-    const int                     row_start,
-    const int                     row_end,
+    const int                     kinit,
+    const int                     kfinal,
     const int*       __restrict__ i,
     const int*       __restrict__ j,
     const double*    __restrict__ val,
@@ -59,16 +59,17 @@ __global__ void gsrb_subloop_contiguous(
     double*          __restrict__ x,
     const double*    __restrict__ b)
 {
-    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    const int ll = idx + row_start;
-
-    if (ll < row_end) {
+    const int kk0 = blockIdx.x * blockDim.x + threadIdx.x;
+    const int dkk = gridDim.x * blockDim.x;
+    
+    for (int kk = kk0 + kinit - 1; kk < kfinal; kk += dkk) {
+        const int ll = kk + 1; // Continuous indexing
         double inner_product = 0.0;
-        int row_start_idx = i[ll] - 1;
-        int row_end_idx = i[ll + 1] - 1;
+        const int row_start = i[ll] - 1;
+        const int row_end = i[ll + 1] - 1;
 
         #pragma unroll 5
-        for (int mm = row_start_idx; mm < row_end_idx; ++mm) {
+        for (int mm = row_start; mm < row_end; ++mm) {
             inner_product += val[mm] * x[j[mm] - 1];
         }
 
@@ -219,8 +220,7 @@ int main()
     float milliseconds_orig = 0, milliseconds_opt = 0;
     double gflops_per_second_orig = 0, gflops_per_second_opt = 0;
     double final_residual_orig = 0, final_residual_opt = 0;
-    int loop_count = 2000;
-    double omega = 1.4; // Define relaxation parameter
+    int loop_count = 100;
 
     // ------------------------
     // Original Version (Strided Access)
